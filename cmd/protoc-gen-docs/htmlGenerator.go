@@ -30,7 +30,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
 	plugin "github.com/golang/protobuf/protoc-gen-go/plugin"
-	"github.com/russross/blackfriday/v2"
+	"gopkg.in/russross/blackfriday.v2"
 
 	googleapi "istio.io/gogo-genproto/googleapis/google/api"
 	"istio.io/tools/pkg/protomodel"

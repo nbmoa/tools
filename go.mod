@@ -3,6 +3,7 @@ module istio.io/tools
 go 1.12
 
 replace (
+	gopkg.in/russross/blackfriday.v2 => github.com/russross/blackfriday/v2 v2.0.1
 	k8s.io/api => k8s.io/api v0.0.0-20190817221950-ebce17126a01
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.0.0-20191011152811-a1d7614a8e0f
 	k8s.io/apimachinery => k8s.io/apimachinery v0.0.0-20190817221809-bf4de9df677c
@@ -26,7 +27,6 @@ require (
 	github.com/kr/pretty v0.1.0
 	github.com/modern-go/reflect2 v1.0.1 // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
-	github.com/russross/blackfriday/v2 v2.0.1
 	github.com/shurcooL/sanitized_anchor_name v1.0.0 // indirect
 	github.com/spf13/cobra v0.0.4
 	github.com/spf13/viper v1.4.0
@@ -38,6 +38,7 @@ require (
 	google.golang.org/appengine v1.6.5 // indirect
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
+	gopkg.in/russross/blackfriday.v2 v2.0.1
 	gopkg.in/yaml.v2 v2.2.4
 	istio.io/gogo-genproto v0.0.0-20191009201739-17d570f95998
 	k8s.io/api v0.0.0-20191004120003-3a12735a829a
