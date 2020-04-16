@@ -54,6 +54,7 @@ func generate(request plugin.CodeGeneratorRequest) (*plugin.CodeGeneratorRespons
 	camelCaseFields := true
 	customStyleSheet := ""
 	perFile := false
+	oneToRuleThemAll := false
 	warningsAsErrors := false
 	dictionary := ""
 	customWordList := ""
@@ -102,12 +103,17 @@ func generate(request plugin.CodeGeneratorRequest) (*plugin.CodeGeneratorRespons
 			}
 		} else if k == "custom_style_sheet" {
 			customStyleSheet = v
-		} else if k == "per_file" {
+		} else if k == "bundle" {
 			switch strings.ToLower(v) {
-			case "true":
+			case "per":
 				perFile = true
-			case "false":
+				oneToRuleThemAll = false
+			case "pkg":
 				perFile = false
+				oneToRuleThemAll = false
+			case "one":
+				perFile = false
+				oneToRuleThemAll = true
 			default:
 				return nil, fmt.Errorf("unknown value '%s' for per_file", v)
 			}
@@ -157,7 +163,7 @@ func generate(request plugin.CodeGeneratorRequest) (*plugin.CodeGeneratorRespons
 		}
 	}
 
-	g := newHTMLGenerator(m, mode, genWarnings, warningsAsErrors, s, emitYAML, camelCaseFields, customStyleSheet, perFile)
+	g := newHTMLGenerator(m, mode, genWarnings, warningsAsErrors, s, emitYAML, camelCaseFields, customStyleSheet, perFile, oneToRuleThemAll)
 	return g.generateOutput(filesToGen)
 }
 

@@ -20,7 +20,6 @@ import (
 	"os"
 	"path"
 	"regexp"
-	"strconv"
 	"strings"
 	"unicode"
 
@@ -62,6 +61,7 @@ type htmlGenerator struct {
 	emitYAML         bool
 	camelCaseFields  bool
 	perFile          bool
+	oneToRuleThemAll bool
 }
 
 const (
@@ -69,7 +69,7 @@ const (
 )
 
 func newHTMLGenerator(model *protomodel.Model, mode outputMode, genWarnings bool, warningsAsErrors bool, speller *gospell.GoSpell,
-	emitYAML bool, camelCaseFields bool, customStyleSheet string, perFile bool) *htmlGenerator {
+	emitYAML bool, camelCaseFields bool, customStyleSheet string, perFile bool, oneToRuleThemAll bool) *htmlGenerator {
 	return &htmlGenerator{
 		model:            model,
 		mode:             mode,
@@ -80,6 +80,7 @@ func newHTMLGenerator(model *protomodel.Model, mode outputMode, genWarnings bool
 		camelCaseFields:  camelCaseFields,
 		customStyleSheet: customStyleSheet,
 		perFile:          perFile,
+		oneToRuleThemAll: oneToRuleThemAll,
 	}
 }
 
@@ -117,9 +118,13 @@ func (g *htmlGenerator) generatePerFileOutput(filesToGen map[*protomodel.FileDes
 			var filename = path.Base(file.GetName())
 			var extension = path.Ext(filename)
 			var name = filename[0 : len(filename)-len(extension)]
+			var headname = "head." + name
+			var tailname = "head." + name
 
-			rf := g.generateFile(name, file, messages, enums, services)
-			response.File = append(response.File, &rf)
+			rfh := g.generateHeadFile(headname, file, messages, enums, services)
+			response.File = append(response.File, &rfh)
+			rft := g.generateTailFile(tailname, file, messages, enums, services)
+			response.File = append(response.File, &rft)
 		}
 	}
 }
@@ -146,31 +151,81 @@ func (g *htmlGenerator) generatePerPackageOutput(filesToGen map[*protomodel.File
 	response.File = append(response.File, &rf)
 }
 
-func (g *htmlGenerator) generateOutput(filesToGen map[*protomodel.FileDescriptor]bool) (*plugin.CodeGeneratorResponse, error) {
-	// process each package; we produce one output file per package
-	response := plugin.CodeGeneratorResponse{}
+func (g *htmlGenerator) generateOneToRuleThemAllOutput(filesToGen map[*protomodel.FileDescriptor]bool, response *plugin.CodeGeneratorResponse) {
+	// We need to produce a file for this package.
+
+	// Decide which types need to be included in the generated file.
+	// This will be all the types in the fileToGen input files, along with any
+	// dependent types which are located in packages that don't have
+	// a known location on the web.
+	// infarm root FrontMatter
+	top := &protomodel.FileDescriptor{
+		Matter: protomodel.FrontMatter{
+			Title:       "infarm IoT data model",
+			Description: "the infarm IoT data model defines the communicaton data strucutres used to communicate with the infarm IoT farms",
+		},
+	}
+	g.currentPackage = &protomodel.PackageDescriptor{
+		Name: "infarm IoT data model",
+	}
+
+	g.buffer.Reset()
+	// TBD Create header for file
+	g.generateFileHeader(top)
 
 	for _, pkg := range g.model.Packages {
 		g.currentPackage = pkg
-		g.currentFrontMatterProvider = pkg.FileDesc()
-
-		// anything to output for this package?
-		count := 0
 		for _, file := range pkg.Files {
 			if _, ok := filesToGen[file]; ok {
-				count++
-			}
-		}
+				g.currentFrontMatterProvider = file
+				messages := []*protomodel.MessageDescriptor{}
+				enums := []*protomodel.EnumDescriptor{}
+				services := []*protomodel.ServiceDescriptor{}
 
-		if count > 0 {
-			if g.perFile {
-				g.generatePerFileOutput(filesToGen, pkg, &response)
-			} else {
-				g.generatePerPackageOutput(filesToGen, pkg, &response)
+				g.getFileContents(file, &messages, &enums, &services)
+				g.generateFileSection(pkg.Name, file, messages, enums, services)
 			}
 		}
 	}
 
+	g.generateFileFooter()
+	// TBD finialize file
+
+	rf := plugin.CodeGeneratorResponse_File{
+		Name:    proto.String("index.html"),
+		Content: proto.String(g.buffer.String()),
+	}
+	response.File = append(response.File, &rf)
+}
+
+func (g *htmlGenerator) generateOutput(filesToGen map[*protomodel.FileDescriptor]bool) (*plugin.CodeGeneratorResponse, error) {
+	// process each package; we produce one output file per package
+	response := plugin.CodeGeneratorResponse{}
+
+	if g.oneToRuleThemAll {
+		g.generateOneToRuleThemAllOutput(filesToGen, &response)
+	} else {
+		for _, pkg := range g.model.Packages {
+			g.currentPackage = pkg
+			g.currentFrontMatterProvider = pkg.FileDesc()
+
+			// anything to output for this package?
+			count := 0
+			for _, file := range pkg.Files {
+				if _, ok := filesToGen[file]; ok {
+					count++
+				}
+			}
+
+			if count > 0 {
+				if g.perFile {
+					g.generatePerFileOutput(filesToGen, pkg, &response)
+				} else {
+					g.generatePerPackageOutput(filesToGen, pkg, &response)
+				}
+			}
+		}
+	}
 	if g.warningsAsErrors && g.numWarnings > 0 {
 		return nil, fmt.Errorf("treating %d warnings as errors", g.numWarnings)
 	}
@@ -219,10 +274,8 @@ func (g *htmlGenerator) includeUnsituatedDependencies(messages *[]*protomodel.Me
 	}
 }
 
-// Generate a package documentation file or a collection of cross-linked files.
-func (g *htmlGenerator) generateFile(name string, top *protomodel.FileDescriptor, messages []*protomodel.MessageDescriptor,
-	enums []*protomodel.EnumDescriptor, services []*protomodel.ServiceDescriptor) plugin.CodeGeneratorResponse_File {
-	g.buffer.Reset()
+func (g *htmlGenerator) initGenerator(messages []*protomodel.MessageDescriptor,
+	enums []*protomodel.EnumDescriptor, services []*protomodel.ServiceDescriptor) (map[string]*protomodel.MessageDescriptor, map[string]*protomodel.EnumDescriptor, map[string]*protomodel.ServiceDescriptor, []string, []string) {
 
 	var typeList []string
 	var serviceList []string
@@ -288,7 +341,30 @@ func (g *htmlGenerator) generateFile(name string, top *protomodel.FileDescriptor
 	// if there's more than one kind of thing, divide the output in groups
 	g.grouping = numKinds > 1
 
-	g.generateFileHeader(top, len(typeList)+len(serviceList))
+	return messagesMap, enumMap, servicesMap, typeList, serviceList
+}
+
+// Generate a package documentation file or a collection of cross-linked files.
+func (g *htmlGenerator) generateHeadFile(name string, top *protomodel.FileDescriptor, messages []*protomodel.MessageDescriptor,
+	enums []*protomodel.EnumDescriptor, services []*protomodel.ServiceDescriptor) plugin.CodeGeneratorResponse_File {
+
+	g.buffer.Reset()
+	_, _, _, _, _ = g.initGenerator(messages, enums, services)
+
+	g.generateFileHeader(top)
+
+	return plugin.CodeGeneratorResponse_File{
+		Name:    proto.String(name + ".pb.html"),
+		Content: proto.String(g.buffer.String()),
+	}
+}
+
+// Generate a package documentation file or a collection of cross-linked files.
+func (g *htmlGenerator) generateTailFile(name string, top *protomodel.FileDescriptor, messages []*protomodel.MessageDescriptor,
+	enums []*protomodel.EnumDescriptor, services []*protomodel.ServiceDescriptor) plugin.CodeGeneratorResponse_File {
+
+	g.buffer.Reset()
+	messagesMap, enumMap, servicesMap, typeList, serviceList := g.initGenerator(messages, enums, services)
 
 	if len(serviceList) > 0 {
 		if g.grouping {
@@ -323,51 +399,87 @@ func (g *htmlGenerator) generateFile(name string, top *protomodel.FileDescriptor
 	}
 }
 
-func (g *htmlGenerator) generateFileHeader(top *protomodel.FileDescriptor, numEntries int) {
+// Generate a package documentation file or a collection of cross-linked files.
+func (g *htmlGenerator) generateFile(name string, top *protomodel.FileDescriptor, messages []*protomodel.MessageDescriptor,
+	enums []*protomodel.EnumDescriptor, services []*protomodel.ServiceDescriptor) plugin.CodeGeneratorResponse_File {
+
+	g.buffer.Reset()
+	messagesMap, enumMap, servicesMap, typeList, serviceList := g.initGenerator(messages, enums, services)
+
+	g.generateFileHeader(top)
+
+	if len(serviceList) > 0 {
+		if g.grouping {
+			g.emit("<h2 id=\"Services\">Services</h2>")
+		}
+
+		for _, name := range serviceList {
+			service := servicesMap[name]
+			g.generateService(service)
+		}
+	}
+
+	if len(typeList) > 0 {
+		if g.grouping {
+			g.emit("<h2 id=\"Types\">Types</h2>")
+		}
+
+		for _, name := range typeList {
+			if e, ok := enumMap[name]; ok {
+				g.generateEnum(e)
+			} else if m, ok := messagesMap[name]; ok {
+				g.generateMessage(m)
+			}
+		}
+	}
+
+	g.generateFileFooter()
+
+	return plugin.CodeGeneratorResponse_File{
+		Name:    proto.String(name + ".pb.html"),
+		Content: proto.String(g.buffer.String()),
+	}
+}
+
+func (g *htmlGenerator) generateFileSection(name string, top *protomodel.FileDescriptor, messages []*protomodel.MessageDescriptor,
+	enums []*protomodel.EnumDescriptor, services []*protomodel.ServiceDescriptor) {
+	messagesMap, enumMap, servicesMap, typeList, serviceList := g.initGenerator(messages, enums, services)
+
+	if top != nil && top.Matter.Title != "" {
+		g.emit("<h2>", top.Matter.Title, "</h2>")
+	}
+
+	g.generateComment(top.Matter.Location, name)
+
+	if len(serviceList) > 0 {
+		if g.grouping {
+			g.emit("<h3 id=\"Services\">Services</h3>")
+		}
+
+		for _, name := range serviceList {
+			service := servicesMap[name]
+			g.generateService(service)
+		}
+	}
+
+	if len(typeList) > 0 {
+		if g.grouping {
+			g.emit("<h3 id=\"Types\">Types</h3>")
+		}
+
+		for _, name := range typeList {
+			if e, ok := enumMap[name]; ok {
+				g.generateEnum(e)
+			} else if m, ok := messagesMap[name]; ok {
+				g.generateMessage(m)
+			}
+		}
+	}
+}
+
+func (g *htmlGenerator) generateFileHeader(top *protomodel.FileDescriptor) {
 	name := g.currentPackage.Name
-	if g.mode == htmlFragmentWithFrontMatter {
-		g.emit("---")
-
-		if top != nil && top.Matter.Title != "" {
-			g.emit("title: ", top.Matter.Title)
-		} else {
-			g.emit("title: ", name)
-		}
-
-		if top != nil && top.Matter.Overview != "" {
-			g.emit("overview: ", top.Matter.Overview)
-		}
-
-		if top != nil && top.Matter.Description != "" {
-			g.emit("description: ", top.Matter.Description)
-		}
-
-		if top != nil && top.Matter.HomeLocation != "" {
-			g.emit("location: ", top.Matter.HomeLocation)
-		}
-
-		g.emit("layout: protoc-gen-docs")
-		g.emit("generator: protoc-gen-docs")
-
-		// emit additional custom front-matter fields
-		if g.perFile {
-			if top != nil {
-				for _, fm := range top.Matter.Extra {
-					g.emit(fm)
-				}
-			}
-		} else {
-			// Front matter may be in any of the package's files.
-			for _, file := range g.currentPackage.Files {
-				for _, fm := range file.Matter.Extra {
-					g.emit(fm)
-				}
-			}
-		}
-
-		g.emit("number_of_entries: ", strconv.Itoa(numEntries))
-		g.emit("---")
-	} else if g.mode == htmlPage {
+	if g.mode == htmlPage {
 		g.emit("<!DOCTYPE html>")
 		g.emit("<html itemscope itemtype=\"https://schema.org/WebPage\">")
 		g.emit("<!-- Generated by protoc-gen-docs -->")
@@ -429,9 +541,9 @@ func (g *htmlGenerator) generateSectionHeading(desc protomodel.CoreDesc) {
 		class = desc.Class() + " "
 	}
 
-	heading := "h2"
+	heading := "h3"
 	if g.grouping {
-		heading = "h3"
+		heading = "h4"
 	}
 
 	name := g.relativeName(desc)
@@ -1177,7 +1289,7 @@ var htmlStyle = `
 
     h2 {
         font-size: 2rem;
-        color: #2E2E2E;
+        color: #286AC7;
         margin-bottom: 20px;
         margin-top: 30px;
         padding-bottom: 10px;
@@ -1189,7 +1301,7 @@ var htmlStyle = `
     h3 {
         font-size: 1.85rem;
         font-weight: 500;
-        color: #404040;
+        color: #2E2E2E;
         letter-spacing: 1px;
         margin-bottom: 20px;
         margin-top: 30px
@@ -1231,5 +1343,30 @@ var htmlStyle = `
 	.experimental {
 		background: yellow;
 	}
+	/* Style the button that is used to open and close the collapsible content */
+    .collapsible {
+      background-color: #eee;
+      color: #444;
+      cursor: pointer;
+      padding: 18px;
+      width: 100%;
+      border: none;
+      text-align: left;
+      outline: none;
+      font-size: 15px;
+    }
+    
+    /* Add a background color to the button if it is clicked on (add the .active class with JS), and when you move the mouse over it (hover) */
+    .active, .collapsible:hover {
+      background-color: #ccc;
+    }
+    
+    /* Style the collapsible content. Note: hidden by default */
+    .content {
+      padding: 0 18px;
+      display: none;
+      overflow: hidden;
+      background-color: #f1f1f1;
+    }
 </style>
 `

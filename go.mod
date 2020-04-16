@@ -25,9 +25,11 @@ require (
 	github.com/imdario/mergo v0.3.8 // indirect
 	github.com/json-iterator/go v1.1.7 // indirect
 	github.com/kr/pretty v0.1.0
+	github.com/lyft/protoc-gen-star v0.4.14
 	github.com/modern-go/reflect2 v1.0.1 // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
 	github.com/shurcooL/sanitized_anchor_name v1.0.0 // indirect
+	github.com/spf13/afero v1.1.2
 	github.com/spf13/cobra v0.0.4
 	github.com/spf13/viper v1.4.0
 	golang.org/x/net v0.0.0-20191004110552-13f9640d40b9 // indirect
